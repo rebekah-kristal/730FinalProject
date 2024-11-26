@@ -64,10 +64,12 @@ summary(mod3)
 
 ```{r}
 #frequency table for observed data
-observed_counts <- table(newdata1$y)  
-observed_props <- as.data.frame(observed_counts / sum(observed_counts))
+observed_counts <- select(newdata1, c(y, Freq)) 
+total_freq<-group_by(observed_counts, y) %>% summarise(total=sum(Freq)) 
+observed_props<-mutate(total_freq, observed=total/sum(total)) %>% mutate(y=as.factor(y))
 
-observed_props<-rename(observed_props, Observed=Freq)
+
+
 observed_props
 ```
 
@@ -81,8 +83,7 @@ predicted_cats<-as.data.frame(posterior_predict(mod3))
 
 get_sum_stat<-function(y, row){(sum(y==5))/nrow(row)}
 
-tobs<-get_sum_stat(newdata1$y, newdata)
-tobs
+tobs<-observed_props[5,3]
 ```
 
 ```{r}
@@ -109,18 +110,18 @@ category_counts <- table(posterior_preds_long$predicted_category)
 
 
 category_counts_df <- as.data.frame(category_counts)
-colnames(category_counts_df) <- c("Var1", "Count")
+colnames(category_counts_df) <- c("y", "Count")
 
 category_counts_prop<-mutate(category_counts_df, predicted=Count/(4000*5462))
 
-combined<-left_join(observed_props, category_counts_prop, by="Var1")
-combined1<-pivot_longer(combined, c(2,4), names_to = "Freq")
+combined<-left_join(observed_props, category_counts_prop, by="y")
+combined1<-pivot_longer(combined, c(3,5), names_to = "Freq")
 ```
 
 
 ```{r}
 #plot of proportion of each category for observed and predicted data
-ggplot(combined1, mapping=aes(x=Var1, y=value, fill=Freq))+
+ggplot(combined1, mapping=aes(x=y, y=value, fill=Freq))+
   geom_bar(stat="identity", position="dodge")+
   labs(title = "Mental Health Category Proportions for Observed and Predicted Data",
        x = "Category",
