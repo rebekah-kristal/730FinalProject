@@ -1,0 +1,95 @@
+---
+title: "730 Group Project"
+author: "Rebekah Kristal"
+date: "2024-11-14"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(ggplot2)
+library(brms)
+library(posterior)
+library(tidybayes)
+```
+Collaborators: Amani Chehimi, Shane Fitzgerald
+
+```{r}
+#data from Shane
+original_dat <- read.csv("730projectdata.csv") %>%
+rename(y = totalscore)
+#original_dat
+```
+
+```{r}
+#make factor variables into factors, specify missings as NA (Shane already excluded people without mental health data since that is our outcome of interest)
+dat <- original_dat 
+
+dat$REGION[dat$REGION > 4] <- NA
+dat$AGE[dat$AGE > 85] <- NA
+dat$SEX[dat$SEX > 2] <- NA
+dat$RACENEW[dat$RACENEW > 600] <- NA
+dat$EDUC[dat$EDUC > 600 | dat$EDUC == 0] <- NA
+dat$POORYN[dat$POORYN == 9] <- NA
+dat$ALCDAYSYR[dat$ALCDAYSYR > 366] <- NA
+dat$CIGDAYMO[dat$CIGDAYMO > 31] <- NA
+
+dat <- dat %>% select(c(REGION, AGE, SEX, RACENEW, EDUC, POORYN, ALCDAYSYR, CIGDAYMO, y)) %>% mutate(REGION = as.factor(REGION), SEX = as.factor(SEX), RACENEW = as.factor(RACENEW), POORYN = as.factor(POORYN))
+#View(dat)
+head(dat)
+
+colmissings <- function(columninput){round(sum(is.na(columninput))/1714.4, 1)}
+apply(dat, 2, colmissings)
+#dim(dat)
+
+#will need to get rid of cigarette data since we're missing 96.5% of it
+#possibly get rid of alcohol data as well since missing 38.3% of it
+
+dat <- dat %>% select(-c(ALCDAYSYR, CIGDAYMO))
+dat
+```
+```{r}
+#subsetting data as Freq form to get smaller df with weights for brm fit
+dat <- dat %>% mutate(AgeCat = as.numeric(AGE)) %>% mutate(EduCat = EDUC)
+
+dat$AgeCat[dat$AGE < 18] <- "child"
+dat$AgeCat[dat$AGE >= 18 & dat$AGE <= 30] <- "youngAdult"
+dat$AgeCat[dat$AGE > 30 & dat$AGE <= 60] <- "Adult"
+dat$AgeCat[dat$AGE > 60] <- "elderly"
+
+dat$EduCat[dat$EDUC <= 116] <- "Grade 12 or less, no diploma"
+dat$EduCat[dat$EDUC > 116 & dat$EDUC <= 202] <- "High school Diploma, GED, graduate"
+dat$EduCat[dat$EDUC %in% c(300, 301, 302, 303, 400)] <- "Some college, AA or Bachelor's Degree"
+dat$EduCat[dat$EDUC %in% c(500, 501, 502, 503, 504, 505)] <- "Graduate, Professional, or other Degree"
+
+
+dat0 <- dat %>% filter(!is.na(AgeCat) & !is.na(SEX) & !is.na(RACENEW) & !is.na(EduCat) & !is.na(POORYN)) %>% group_by(y, REGION, AgeCat, SEX, RACENEW, EduCat, POORYN) %>% summarise(Freq = n())
+
+#y, REGION, AgeCat, SEX, RACENEW, EduCat, POORYN
+#9 x  4   x   4    x  2  x   8   x   4   x  2 = 18432 rows AT MOST (minus any combinations that don't have any participants in them)
+
+dim(dat0)
+#end up with df to fit with 8 columns (response, freq weighting, hierarchical, and 5 predictors) and 5462 rows 
+```
+
+```{r}
+write.csv(dat0, "FreqCategories.csv")
+
+```
+
+
+
+Baseline model with available covariates
+Response y is integer, region is hierarchical level, age is integer, race/education/poverty are factors
+```{r}
+fit <- brm(y~(1|REGION + AgeCat + SEX + RACENEW + EduCat + POORYN), family = gaussian(), sample_prior = T, data = dat0, iter = 1000, chains = 4, cores = getOption("mc.cores", 4), seed = 12345) #, weights = Freq, or maybe Freq/sum(Freq)??)
+```
+
+```{r}
+summary(fit)
+prior_summary(fit)
+```
+
