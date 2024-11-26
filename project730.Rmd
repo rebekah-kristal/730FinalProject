@@ -1,0 +1,133 @@
+---
+title: "project730"
+output: html_document
+date: "2024-11-07"
+---
+
+```{r setup, include=FALSE}
+library(readr)
+library(writexl)
+library(tidyverse)
+library(brms)
+library(rstan)
+library(bayesplot)
+library(ggplot2)
+
+
+```
+
+
+
+
+
+
+```{r}
+#Changing all variables into factors
+newdata<-read.csv("FreqCategories.csv")
+newdata<-mutate(newdata, weight.var=1/Freq) %>% mutate(REGION=as.factor(REGION)) %>% mutate(AgeCat=as.factor(AgeCat)) %>% mutate(SEX=as.factor(SEX)) %>% mutate(RACENEW=as.factor(RACENEW))%>%mutate(EduCat=as.factor(EduCat)) %>% mutate(POORYN=as.factor(POORYN))
+```
+
+```{r}
+#base model, no weights
+mod1<-brm(y~REGION + AgeCat + SEX + RACENEW + EduCat + POORYN, data=newdata, seed = 12, 
+           chains = 4,
+            iter = 2000, thin = 1,
+            cores = getOption("mc.cores", 4))
+```
+```{r}
+summary(mod1)
+```
+
+```{r}
+#adding weights
+mod2<-brm(y|weights(Freq)~REGION + AgeCat + SEX + RACENEW + EduCat + POORYN, data=newdata, 
+           chains = 4,
+            iter = 2000, thin = 1)
+summary(mod2)
+
+
+```
+
+```{r}
+#trace plots for model 2
+mcmc_trace(mod2)
+```
+```{r}
+#converting y's into factor variable, changing range from 0-8 to 1-9 to match with model output
+newdata1<-mutate(newdata, y=y+1) %>% mutate(y, factor(y, ordered=TRUE)) 
+mod3<-brm(y|weights(Freq)~REGION + AgeCat + SEX + RACENEW + EduCat + POORYN, data=newdata1, family=cumulative(link="logit"), seed=12,
+           chains = 4,
+            iter = 2000, thin = 1)
+summary(mod3)
+```
+
+
+```{r}
+#frequency table for observed data
+observed_counts <- table(newdata1$y)  
+observed_props <- as.data.frame(observed_counts / sum(observed_counts))
+
+observed_props<-rename(observed_props, Observed=Freq)
+observed_props
+```
+
+
+
+
+```{r}
+#simulated datasets from model, creating function for summary statistic and getting summary statistic for observed data, in this case, proportion of observations falling into category 5
+
+predicted_cats<-as.data.frame(posterior_predict(mod3))
+
+get_sum_stat<-function(y, row){(sum(y==5))/nrow(row)}
+
+tobs<-get_sum_stat(newdata1$y, newdata)
+tobs
+```
+
+```{r}
+#summary statistics for predicted datasets
+ynew_si<-apply(predicted_cats, 1, get_sum_stat, newdata)
+
+```
+
+```{r}
+#ppc for proportion of observations in category 5
+hist(ynew_si)
+abline(v = tobs)
+```
+
+
+```{r}
+#formatting for double barplot ggplot
+posterior_preds_long <- predicted_cats %>%
+  pivot_longer(cols = everything(), names_to = "chain", values_to = "predicted_category")
+
+posterior_preds_long$predicted_category <- as.factor(posterior_preds_long$predicted_category)
+
+category_counts <- table(posterior_preds_long$predicted_category)
+
+
+category_counts_df <- as.data.frame(category_counts)
+colnames(category_counts_df) <- c("Var1", "Count")
+
+category_counts_prop<-mutate(category_counts_df, predicted=Count/(4000*5462))
+
+combined<-left_join(observed_props, category_counts_prop, by="Var1")
+combined1<-pivot_longer(combined, c(2,4), names_to = "Freq")
+```
+
+
+```{r}
+#plot of proportion of each category for observed and predicted data
+ggplot(combined1, mapping=aes(x=Var1, y=value, fill=Freq))+
+  geom_bar(stat="identity", position="dodge")+
+  labs(title = "Mental Health Category Proportions for Observed and Predicted Data",
+       x = "Category",
+       y = "Proportion") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+
+
