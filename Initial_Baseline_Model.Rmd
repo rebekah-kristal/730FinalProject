@@ -1,0 +1,267 @@
+---
+title: "730_Final_Project"
+author: "Amani Chehimi"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    keep_md: true
+knitr:
+  opts_chunk:
+    echo: false
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(tidyverse) 
+library(ggplot2)    
+library(brms)       
+library(posterior)  
+library(tidybayes)
+```
+
+```{r}
+original_dat <- read.csv("730projectdata.csv") %>%
+  rename(y = totalscore)
+```
+
+## Data Cleaning
+
+```{r}
+dat <- original_dat
+
+dat$REGION[dat$REGION > 4] <- NA
+dat$AGE[dat$AGE > 85] <- NA
+dat$SEX[dat$SEX > 2] <- NA
+dat$RACENEW[dat$RACENEW > 600] <- NA
+dat$EDUC[dat$EDUC > 600 | dat$EDUC == 0] <- NA
+dat$POORYN[dat$POORYN == 9] <- NA
+dat$ALCDAYSYR[dat$ALCDAYSYR > 366] <- NA
+dat$CIGDAYMO[dat$CIGDAYMO > 31] <- NA
+```
+
+### Relevant Columns and Convert to Factors
+```{r}
+dat <- dat %>%
+  select(c(REGION, AGE, SEX, RACENEW, EDUC, POORYN, ALCDAYSYR, CIGDAYMO, y)) %>%
+  mutate(
+    REGION = as.factor(REGION),
+    SEX = as.factor(SEX),
+    RACENEW = as.factor(RACENEW),
+    POORYN = as.factor(POORYN)
+  )
+```
+
+### Missingness and Drop High-Missingness Variables
+```{r}
+colmissings <- function(columninput) {
+  round(sum(is.na(columninput)) / nrow(dat), 2)
+}
+
+apply(dat, 2, colmissings)
+
+dat <- dat %>% select(-c(ALCDAYSYR, CIGDAYMO))
+```
+
+
+# Frequency-Based Dataset for Efficiency
+
+### Age and Education Categories
+```{r}
+dat <- dat %>%
+  mutate(
+    AgeCat = case_when(
+      AGE < 18 ~ "child",
+      AGE >= 18 & AGE <= 30 ~ "youngAdult",
+      AGE > 30 & AGE <= 60 ~ "Adult",
+      AGE > 60 ~ "elderly"
+    )
+  )
+
+dat <- dat %>%
+  mutate(
+    EduCat = case_when(
+      EDUC <= 116 ~ "Grade 12 or less, no diploma",
+      EDUC > 116 & EDUC <= 202 ~ "High school Diploma, GED, graduate",
+      EDUC %in% c(300, 301, 302, 303, 400) ~ "Some college, AA or Bachelor's Degree",
+      EDUC %in% c(500, 501, 502, 503, 504, 505) ~ "Graduate, Professional, or other Degree"
+    )
+  )
+```
+
+### Summarized Data into Frequency Form
+```{r}
+dat0 <- dat %>%
+  filter(!is.na(AgeCat) & !is.na(SEX) & !is.na(RACENEW) & !is.na(EduCat) & !is.na(POORYN)) %>%
+  group_by(y, REGION, AgeCat, SEX, RACENEW, EduCat, POORYN) %>%
+  summarise(Freq = n(), .groups = "drop") %>%
+  mutate(Weight = Freq / sum(Freq))
+```
+
+```{r}
+write.csv(dat0, "FreqCategories.csv", row.names = FALSE)
+```
+
+
+# Fitting the Baseline Model
+
+```{r}
+Freq_dat <- read_csv("FreqCategories.csv")
+```
+```{r}
+print(head(dat0))
+print(head(Freq_dat))
+```
+
+
+
+
+### Baseline Model Without Interaction Terms
+```{r}
+fit <- brm(
+  y | weights(Weight) ~ (1 | REGION + AgeCat + SEX + RACENEW + EduCat + POORYN), 
+  family = gaussian(), 
+  data = dat0, 
+  iter = 1000, 
+  chains = 4, 
+  cores = getOption("mc.cores", 4), 
+  seed = 12345
+) 
+```
+
+```{r}
+summary(fit)
+prior_summary(fit)
+```
+
+
+```{r}
+pp_check(fit)
+```
+
+
+
+
+### 1. Check Model Assumptions
+
+**Residual Analysis**
+
+```{r}
+residuals <- residuals(fit, type = "ordinary")
+fitted_vals <- fitted(fit)
+
+diagnostics_df <- data.frame(
+  residuals = residuals,
+  fitted = fitted_vals
+)
+
+colnames(diagnostics_df)
+```
+
+```{r}
+# Residual vs. Fitted Plot
+ggplot(data = diagnostics_df, aes(x = fitted.Estimate, y = residuals.Estimate)) +
+  geom_point(alpha = 0.5) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(
+    title = "Residuals vs Fitted Values",
+    x = "Fitted Estimate",
+    y = "Residuals Estimate"
+  )
+```
+
+The "Residuals vs Fitted Values" plot reveals a potential issue with the model's assumptions. While the residuals are centered around the red dashed line at \( y = 0 \), indicating no systematic over- or under-prediction, the clear clustering or banding patterns suggest non-random residual distribution. This pattern might indicate heteroscedasticity (non-constant variance) or that the model is missing key variables or interactions needed to fully capture the underlying trends in the data. Additionally, the presence of distinct bands could point to the model's inability to account for certain systematic structures. 
+
+```{r}
+#Historgram of the residuals
+ggplot(data = data.frame(residuals = residuals), aes(x = residuals.Estimate)) +
+  geom_histogram(bins = 30, color = "black", fill = "blue", alpha = 0.7) +
+  labs(title = "Histogram of Residuals", x = "Residuals", y = "Frequency")
+
+# qqplot for residuals
+ggplot(data = diagnostics_df, aes(sample = residuals.Estimate)) +
+  stat_qq() +
+  stat_qq_line() +
+  labs(title = "QQ Plot of Residuals", x = "Theoretical Quantiles", y = "Sample Quantiles")
+```
+
+
+The histogram of residuals shows a non-uniform distribution with visible peaks and valleys, further supporting the conclusion that the residuals do not follow a normal distribution. The clustering and uneven spread of residuals could point to underlying patterns in the data that the model has not fully captured, suggesting the need for further model refinement or consideration of alternative assumptions.
+
+From the QQ plot, it is evident that the residuals deviate from the straight line at both ends, indicating that the residuals are not perfectly normally distributed. While the central portion of the residuals aligns fairly well with the theoretical quantiles, the deviations in the tails suggest potential issues with model assumptions, such as the presence of outliers or heavy-tailed distributions.
+
+
+**Fixed Effects and Coefficients**
+
+```{r}
+fixef(fit) # Summary of Fixed Effects
+
+posterior_summary(fit)
+```
+
+### Key Takeaways
+
+**Fixed Effects Interpretation**  
+The intercept (\( 2.63 \)) shows high uncertainty, with a wide credible interval including zero. Group-level random effects show moderate variability, and residual variance (\( \sigma = 5.99 \)) indicates significant unexplained variability.  
+
+
+**Posterior Summary of Random Effects**  
+Group-level deviations are small, often near zero, with credible intervals including zero, suggesting limited evidence for substantial effects.  
+
+
+**Model Fit and Variance**  
+Unexplained variability remains high (\( \sigma = 5.99 \)), with moderate group-level heterogeneity but wide credible intervals, highlighting the need for additional predictors.  
+
+
+
+
+**PPC for Variable Combinations**
+
+```{r}
+# PPC for Specific Covariate Combinations
+pp_check(fit, type = "intervals", group = "AgeCat")
+pp_check(fit, type = "dens_overlay")
+```
+
+### Key Takeaways
+
+**PPC Interval Plot Interpretation**
+
+The interval plot shows that the model generally captures the trends in the data, as most observed points (`y`) fall within the predicted intervals (`y_rep`). However, the stepwise pattern in the observed data, especially at higher indices, is not fully replicated by the model, indicating it may miss finer group-specific details.
+
+
+**PPC Density Overlay Plot Interpretation**
+
+The density plot highlights that the model captures the overall shape of the data but fails to replicate the sharp, stepwise peaks in the observed density (`y`). The predicted densities are smoother, and deviations are noticeable in the tails, suggesting the model struggles with abrupt changes and extreme values.
+
+
+
+```{r}
+# Export Fixed Effects Summary
+fixed_effects_summary <- as.data.frame(fixef(fit))
+write.csv(fixed_effects_summary, "fixed_effects_summary.csv", row.names = FALSE)
+
+# Save Posterior Predictive Checks
+ggsave("residuals_vs_fitted.png", width = 8, height = 6)
+ggsave("histogram_residuals.png", width = 8, height = 6)
+ggsave("ppc_intervals.png", width = 8, height = 6)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
