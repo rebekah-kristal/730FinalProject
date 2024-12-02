@@ -17,212 +17,55 @@ library(tidybayes)
 library(rstan)
 library(bayesplot)
 ```
-# Amani's Model: weighted linear regression
 
+# Rebekah's model: weighted ordinal regression w interactions
 ```{r}
-dat0 <- read_csv("FreqCategories.csv") %>%  mutate(Weight = Freq / sum(Freq))
-```
-
-```{r}
-fit <- brm(
-  y | weights(Weight) ~ (1 | REGION + AgeCat + SEX + RACENEW + EduCat + POORYN), 
-  family = gaussian(), 
-  data = dat0, 
-  iter = 1000, 
-  chains = 4, 
-  cores = getOption("mc.cores", 4), 
-  seed = 12345
-) 
-
-summary(fit)
-prior_summary(fit)
-pp_check(fit)
-```
-
-
-# Shane's model: weighted ordinal regression
-```{r}
-newdata <- dat0
+newdata <- read_csv("FreqCategories.csv") %>%  mutate(Weight = Freq / sum(Freq))
 newdata<-mutate(newdata, weight.var=1/Freq) %>% mutate(REGION=as.factor(REGION)) %>% mutate(AgeCat=as.factor(AgeCat)) %>% mutate(SEX=as.factor(SEX)) %>% mutate(RACENEW=as.factor(RACENEW))%>%mutate(EduCat=as.factor(EduCat)) %>% mutate(POORYN=as.factor(POORYN))
-```
 
-```{r}
 #converting y's into factor variable, changing range from 0-8 to 1-9 to match with model output
 newdata1<-mutate(newdata, y=y+1) %>% mutate(y, factor(y, ordered=TRUE)) 
-mod3<-brm(y|weights(Freq)~REGION + AgeCat + SEX + RACENEW + EduCat + POORYN, data=newdata1, family=cumulative(link="logit"), seed=12,
+modR<-brm(y|weights(Freq)~REGION + AgeCat + SEX + RACENEW + EduCat + POORYN + REGION*POORYN + REGION*RACENEW + RACENEW*POORYN, data=newdata1, family=cumulative(link="logit"), seed=12,
            chains = 4,
             iter = 2000, thin = 1)
-summary(mod3)
-mcmc_trace(mod3)
+summary(modR)
+mcmc_trace(modR)
 ```
 
-
-# Check Model Assumptions for Amani's Model
-
-**Residual Analysis**
-
+# Analysis with Rebekah's Model
 ```{r}
-residuals <- residuals(fit, type = "ordinary")
-fitted_vals <- fitted(fit)
-
-diagnostics_df <- data.frame(
-  residuals = residuals,
-  fitted = fitted_vals
-)
-
-colnames(diagnostics_df)
-```
-
-```{r}
-# Residual vs. Fitted Plot
-ggplot(data = diagnostics_df, aes(x = fitted.Estimate, y = residuals.Estimate)) +
-  geom_point(alpha = 0.5) +
-  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
-  labs(
-    title = "Residuals vs Fitted Values",
-    x = "Fitted Estimate",
-    y = "Residuals Estimate"
-  )
-```
-
-The "Residuals vs Fitted Values" plot reveals a potential issue with the model's assumptions. While the residuals are centered around the red dashed line at \( y = 0 \), indicating no systematic over- or under-prediction, the clear clustering or banding patterns suggest non-random residual distribution. This pattern might indicate heteroscedasticity (non-constant variance) or that the model is missing key variables or interactions needed to fully capture the underlying trends in the data. Additionally, the presence of distinct bands could point to the model's inability to account for certain systematic structures. 
-
-```{r}
-#Histogram of the residuals
-ggplot(data = data.frame(residuals = residuals), aes(x = residuals.Estimate)) +
-  geom_histogram(bins = 30, color = "black", fill = "blue", alpha = 0.7) +
-  labs(title = "Histogram of Residuals", x = "Residuals", y = "Frequency")
-
-# qqplot for residuals
-ggplot(data = diagnostics_df, aes(sample = residuals.Estimate)) +
-  stat_qq() +
-  stat_qq_line() +
-  labs(title = "QQ Plot of Residuals", x = "Theoretical Quantiles", y = "Sample Quantiles")
-```
-
-
-The histogram of residuals shows a non-uniform distribution with visible peaks and valleys, further supporting the conclusion that the residuals do not follow a normal distribution. The clustering and uneven spread of residuals could point to underlying patterns in the data that the model has not fully captured, suggesting the need for further model refinement or consideration of alternative assumptions.
-
-From the QQ plot, it is evident that the residuals deviate from the straight line at both ends, indicating that the residuals are not perfectly normally distributed. While the central portion of the residuals aligns fairly well with the theoretical quantiles, the deviations in the tails suggest potential issues with model assumptions, such as the presence of outliers or heavy-tailed distributions.
-
-
-**Fixed Effects and Coefficients**
-
-```{r}
-fixef(fit) # Summary of Fixed Effects
-
-posterior_summary(fit)
-```
-
-## Key Takeaways
-
-**Fixed Effects Interpretation**  
-The intercept (\( 2.63 \)) shows high uncertainty, with a wide credible interval including zero. Group-level random effects show moderate variability, and residual variance (\( \sigma = 5.99 \)) indicates significant unexplained variability.  
-
-
-**Posterior Summary of Random Effects**  
-Group-level deviations are small, often near zero, with credible intervals including zero, suggesting limited evidence for substantial effects.  
-
-
-**Model Fit and Variance**  
-Unexplained variability remains high (\( \sigma = 5.99 \)), with moderate group-level heterogeneity but wide credible intervals, highlighting the need for additional predictors.  
-
-
-
-
-**PPC for Variable Combinations**
-
-```{r}
-# PPC for Specific Covariate Combinations
-pp_check(fit, type = "intervals", group = "AgeCat")
-pp_check(fit, type = "dens_overlay")
-```
-
-### Key Takeaways
-
-**PPC Interval Plot Interpretation**
-
-The interval plot shows that the model generally captures the trends in the data, as most observed points (`y`) fall within the predicted intervals (`y_rep`). However, the stepwise pattern in the observed data, especially at higher indices, is not fully replicated by the model, indicating it may miss finer group-specific details.
-
-
-**PPC Density Overlay Plot Interpretation**
-
-The density plot highlights that the model captures the overall shape of the data but fails to replicate the sharp, stepwise peaks in the observed density (`y`). The predicted densities are smoother, and deviations are noticeable in the tails, suggesting the model struggles with abrupt changes and extreme values.
-
-
-
-```{r}
-# Export Fixed Effects Summary
-fixed_effects_summary <- as.data.frame(fixef(fit))
-write.csv(fixed_effects_summary, "fixed_effects_summary.csv", row.names = FALSE)
-
-# Save Posterior Predictive Checks
-ggsave("residuals_vs_fitted.png", width = 8, height = 6)
-ggsave("histogram_residuals.png", width = 8, height = 6)
-ggsave("ppc_intervals.png", width = 8, height = 6)
-```
-
-
-# Analysis with Shane's Model
-
-```{r}
-#frequency table for observed data
 observed_counts <- select(newdata1, c(y, Freq)) 
 total_freq<-group_by(observed_counts, y) %>% summarise(total=sum(Freq)) 
 observed_props<-mutate(total_freq, observed=total/sum(total)) %>% mutate(y=as.factor(y))
 
 
-
-observed_props
-```
-
-
-```{r}
-#simulated datasets from model, creating function for summary statistic and getting summary statistic for observed data, in this case, proportion of observations falling into category 5
-
-predicted_cats<-as.data.frame(posterior_predict(mod3))
-
 get_sum_stat<-function(y, row){(sum(y==5))/nrow(row)}
 
 tobs<-observed_props[5,3]
-```
 
-```{r}
-#summary statistics for predicted datasets
-ynew_si<-apply(predicted_cats, 1, get_sum_stat, newdata)
-
-```
-
-```{r}
+predicted_catsR<-as.data.frame(posterior_predict(modR))
+ynew_siR<-apply(predicted_catsR, 1, get_sum_stat, newdata)
 #ppc for proportion of observations in category 5
-hist(ynew_si)
+hist(ynew_siR)
 abline(v = tobs)
-```
 
-
-```{r}
-#formatting for double barplot ggplot
-posterior_preds_long <- predicted_cats %>%
+#ppc for all categories
+#formatting for ggplot
+posterior_preds_longR <- predicted_catsR %>%
   pivot_longer(cols = everything(), names_to = "chain", values_to = "predicted_category")
 
-posterior_preds_long$predicted_category <- as.factor(posterior_preds_long$predicted_category)
+posterior_preds_longR$predicted_category <- as.factor(posterior_preds_longR$predicted_category)
 
-category_counts <- table(posterior_preds_long$predicted_category)
+category_countsR <- table(posterior_preds_longR$predicted_category)
+category_counts_dfR <- as.data.frame(category_countsR)
+colnames(category_counts_dfR) <- c("y", "Count")
+category_counts_propR<-mutate(category_counts_dfR, predicted=Count/(4000*5462))
 
+combinedR<-left_join(observed_props, category_counts_propR, by="y")
+combined1R<-pivot_longer(combinedR, c(3,5), names_to = "Freq")
 
-category_counts_df <- as.data.frame(category_counts)
-colnames(category_counts_df) <- c("y", "Count")
-
-category_counts_prop<-mutate(category_counts_df, predicted=Count/(4000*5462))
-
-combined<-left_join(observed_props, category_counts_prop, by="y")
-combined1<-pivot_longer(combined, c(3,5), names_to = "Freq")
-```
-
-
-```{r}
 #plot of proportion of each category for observed and predicted data
-ggplot(combined1, mapping=aes(x=y, y=value, fill=Freq))+
+ggplot(combined1R, mapping=aes(x=y, y=value, fill=Freq))+
   geom_bar(stat="identity", position="dodge")+
   labs(title = "Mental Health Category Proportions for Observed and Predicted Data",
        x = "Category",
@@ -230,5 +73,6 @@ ggplot(combined1, mapping=aes(x=y, y=value, fill=Freq))+
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```
+
 
 
