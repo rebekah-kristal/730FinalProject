@@ -28,6 +28,7 @@ newdata<-mutate(newdata, weight.var=1/Freq) %>% mutate(REGION=as.factor(REGION))
 newdata1<-mutate(newdata, y=y+1) %>% mutate(y, factor(y, ordered=TRUE)) 
 ```
 # Model fitting
+Note: using brm for hierarchical models, and will only compare these using our PPC plots; stan_glm didn't like the "|" specification, and haven't yet figured out a workaround
 
 ## Amani's model: weighted linear regression with hierarchical variable
 ```{r}
@@ -45,8 +46,9 @@ modALoo <- brm(
 
 ## Shane's model: weighted ordinal regression
 ```{r}
-modSLoo <- stan_glm(y|weights(Freq)~REGION + AgeCat + SEX + RACENEW + EduCat + POORYN,
-  data = newdata1,
+modSLoo <- stan_glm(y~REGION + AgeCat + SEX + RACENEW + EduCat + POORYN,
+  data = newdata1, 
+  weights = Weight,
   family=cumulative(link="logit"),  
   iter = 1000, 
   chains = 4, 
@@ -71,8 +73,9 @@ modRLoo1 <- brm(
 ## Rebekah's model 2: weighted ordinal regression with interactions
 ```{r}
 modRLoo2 <- stan_glm(
-  y|weights(Freq)~REGION + AgeCat + SEX + RACENEW + EduCat + POORYN + REGION*POORYN + REGION*RACENEW + RACENEW*POORYN, 
+  y~REGION + AgeCat + SEX + RACENEW + EduCat + POORYN + REGION*POORYN + REGION*RACENEW + RACENEW*POORYN, 
   data = newdata1,
+  weights = Weight,
   family=cumulative(link="logit"),  
   iter = 1000, 
   chains = 4, 
@@ -143,7 +146,6 @@ make_ppc_plot(modRLoo2)
 ```
 
 # Model Comparisons using loo package
-## Note that stan_glm didn't allow hierarchical models (as far as we could tell, and haven't yet remedied that)
 ```{r}
 looOrd <- loo(modSLoo, save_psis = TRUE)
 looOrdInter <- loo(modRLoo2, save_psis = TRUE)
