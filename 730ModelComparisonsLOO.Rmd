@@ -1,0 +1,220 @@
+---
+title: "730 Group Project"
+author: "Rebekah Kristal with collaborators Amani Chehimi & Shane Fitzgerald"
+date: "2024-11-30"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(ggplot2)
+library(brms)
+library(posterior)
+library(tidybayes)
+library(rstan)
+library(bayesplot)
+library(rstanarm)
+library(loo)
+```
+# Data reformatting
+```{r}
+newdata <- read_csv("FreqCategories.csv") %>%  mutate(Weight = Freq / sum(Freq))
+newdata<-mutate(newdata, weight.var=1/Freq) %>% mutate(REGION=as.factor(REGION)) %>% mutate(AgeCat=as.factor(AgeCat)) %>% mutate(SEX=as.factor(SEX)) %>% mutate(RACENEW=as.factor(RACENEW))%>%mutate(EduCat=as.factor(EduCat)) %>% mutate(POORYN=as.factor(POORYN))
+
+#converting y's into factor variable, changing range from 0-8 to 1-9 to match with model output
+newdata1<-mutate(newdata, y=y+1) %>% mutate(y, factor(y, ordered=TRUE)) 
+```
+# Model fitting
+
+## Amani's model: weighted linear regression with hierarchical variable
+```{r}
+modALoo <- stan_glm(
+  y | weights(Weight) ~ (1 | REGION + AgeCat + SEX + RACENEW + EduCat + POORYN), 
+  data = newdata1,
+  family = gaussian(), 
+  iter = 1000, 
+  chains = 4, 
+  cores = getOption("mc.cores", 4), 
+  seed = 12345
+) 
+```
+
+
+## Shane's model: weighted ordinal regression
+```{r}
+modSLoo <- stan_glm(y|weights(Freq)~REGION + AgeCat + SEX + RACENEW + EduCat + POORYN,
+  data = newdata1,
+  family=cumulative(link="logit"),  
+  iter = 1000, 
+  chains = 4, 
+  cores = getOption("mc.cores", 4), 
+  seed = 12345
+)
+```
+
+## Rebekah's model 1: weighted ordinal regression with hierarchical variable
+```{r}
+modRLoo1 <- stan_glm(
+  y | weights(Weight) ~ (1 | REGION + AgeCat + SEX + RACENEW + EduCat + POORYN),
+  data = newdata1,
+  family=cumulative(link="logit"),  
+  iter = 1000, 
+  chains = 4, 
+  cores = getOption("mc.cores", 4), 
+  seed = 12345
+)
+```
+
+## Rebekah's model 2: weighted ordinal regression with interactions
+```{r}
+modRLoo2 <- stan_glm(
+  y|weights(Freq)~REGION + AgeCat + SEX + RACENEW + EduCat + POORYN + REGION*POORYN + REGION*RACENEW + RACENEW*POORYN, 
+  data = newdata1,
+  family=cumulative(link="logit"),  
+  iter = 1000, 
+  chains = 4, 
+  cores = getOption("mc.cores", 4), 
+  seed = 12345
+)
+```
+
+# Our own PPC plots of expected vs observed counts
+
+## get observed counts from data
+```{r}
+observed_counts <- select(newdata1, c(y, Freq)) 
+total_freq<-group_by(observed_counts, y) %>% summarise(total=sum(Freq)) 
+observed_props<-mutate(total_freq, observed=total/sum(total)) %>% mutate(y=as.factor(y))
+
+
+get_sum_stat<-function(y, row){(sum(y==5))/nrow(row)}
+
+tobs<-observed_props[5,3]
+```
+
+## function to make ppc plot for each model of proportion of people in each response category
+```{r}
+make_ppc_plot <- function(model_name){
+    predicted_catsR<-as.data.frame(posterior_predict(model_name))
+    ynew_siR<-apply(predicted_catsR, 1, get_sum_stat, newdata)
+    #ppc for proportion of observations in category 5
+    hist(ynew_siR)
+    abline(v = tobs)
+    
+    #ppc for all categories
+    #formatting for ggplot
+    posterior_preds_longR <- predicted_catsR %>%
+      pivot_longer(cols = everything(), names_to = "chain", values_to = "predicted_category")
+    
+    posterior_preds_longR$predicted_category <- as.factor(posterior_preds_longR$predicted_category)
+    
+    category_countsR <- table(posterior_preds_longR$predicted_category)
+    category_counts_dfR <- as.data.frame(category_countsR)
+    colnames(category_counts_dfR) <- c("y", "Count")
+    category_counts_propR<-mutate(category_counts_dfR, predicted=Count/(4000*5462))
+    
+    combinedR<-left_join(observed_props, category_counts_propR, by="y")
+    combined1R<-pivot_longer(combinedR, c(3,5), names_to = "Freq")
+    
+    #plot of proportion of each category for observed and predicted data
+    ggplot(combined1R, mapping=aes(x=y, y=value, fill=Freq))+
+      geom_bar(stat="identity", position="dodge")+
+      labs(title = "Mental Health Category Proportions for Observed and Predicted Data",
+           x = "Category",
+           y = "Proportion") +
+      theme_minimal() +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))
+}
+```
+
+## Make proportion PPC plots
+```{r}
+# Amani's model
+make_ppc_plot(modALoo)
+# Shane's model
+make_ppc_plot(modSLoo)
+# Rebekah's model 1
+make_ppc_plot(modRLoo1)
+# Rebekah's model 2
+make_ppc_plot(modRLoo2)
+```
+
+# Model Comparisons using loo package
+```{r}
+looHier <- loo(modALoo, save_psis = TRUE)
+looOrd <- loo(modSLoo, save_psis = TRUE)
+looOrdHier <- loo(modRLoo1, save_psis = TRUE)
+looOrdInter <- loo(modRLoo2, save_psis = TRUE)
+```
+
+## PSIS Diagnostic Plots
+```{r}
+plot(looHier)
+plot(looOrd)
+plot(looOrdHier)
+plot(looOrdInter)
+```
+
+## Marginal PPCs
+```{r}
+#Amani's model
+yrep <- posterior_predict(modALoo)
+
+ppc_loo_pit_qq(
+  y = newdata1$y,
+  yrep = yrep,
+  lw = weights(looHier$psis_object)
+)
+
+#Shane's model
+yrep <- posterior_predict(modSLoo)
+
+ppc_loo_pit_qq(
+  y = newdata1$y,
+  yrep = yrep,
+  lw = weights(looOrd$psis_object)
+)
+
+#Rebekah's model 1
+yrep <- posterior_predict(modRLoo1)
+
+ppc_loo_pit_qq(
+  y = newdata1$y,
+  yrep = yrep,
+  lw = weights(looOrdHier$psis_object)
+)
+
+#Rebekah's model 2
+yrep <- posterior_predict(modRLoo2)
+
+ppc_loo_pit_qq(
+  y = newdata1$y,
+  yrep = yrep,
+  lw = weights(looOrdInter$psis_object)
+)
+
+```
+
+
+## Comparing Models on Expected Log Predictive Density
+```{r}
+#linear regression w region hierarchical variable vs ordinal regression w/ no hierarchy
+loo_compare(looHier, looOrd)
+
+#linear vs ordinal, both w region hierarchical
+loo_compare(looHier, looOrdHier)
+
+#ordinal without vs with interactions
+loo_compare(looOrd, looOrdInter)
+
+#ordinal without vs with hierarchical
+loo_compare(looOrd, looOrdHier)
+
+#ordinal with hierarchical no interactions vs interactions no hierarchical
+loo_compare(looOrdHier, looOrdInter)
+```
+
+
