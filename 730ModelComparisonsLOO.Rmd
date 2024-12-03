@@ -28,7 +28,6 @@ newdata<-mutate(newdata, weight.var=1/Freq) %>% mutate(REGION=as.factor(REGION))
 newdata1<-mutate(newdata, y=y+1) %>% mutate(y, factor(y, ordered=TRUE)) 
 ```
 # Model fitting
-Note: using brm for hierarchical models, and will only compare these using our PPC plots; stan_glm didn't like the "|" specification, and haven't yet figured out a workaround
 
 ## Amani's model: weighted linear regression with hierarchical variable
 ```{r}
@@ -43,12 +42,11 @@ modALoo <- brm(
 ) 
 ```
 
-
 ## Shane's model: weighted ordinal regression
 ```{r}
-modSLoo <- stan_glm(y~REGION + AgeCat + SEX + RACENEW + EduCat + POORYN,
+modSLoo <- brm(
+  y|weights(Weight)~REGION + AgeCat + SEX + RACENEW + EduCat + POORYN,
   data = newdata1, 
-  weights = Weight,
   family=cumulative(link="logit"),  
   iter = 1000, 
   chains = 4, 
@@ -72,10 +70,9 @@ modRLoo1 <- brm(
 
 ## Rebekah's model 2: weighted ordinal regression with interactions
 ```{r}
-modRLoo2 <- stan_glm(
-  y~REGION + AgeCat + SEX + RACENEW + EduCat + POORYN + REGION*POORYN + REGION*RACENEW + RACENEW*POORYN, 
+modRLoo2 <- brm(
+  y|weights(Weight)~REGION + AgeCat + SEX + RACENEW + EduCat + POORYN + REGION*POORYN + REGION*RACENEW + RACENEW*POORYN, 
   data = newdata1,
-  weights = Weight,
   family=cumulative(link="logit"),  
   iter = 1000, 
   chains = 4, 
@@ -146,44 +143,83 @@ make_ppc_plot(modRLoo2)
 ```
 
 # Model Comparisons using loo package
+Note: using brm to fit all models, then will "pass an array or matrix of log-likelihood values to the loo function," since stan_glm doesn't like the "|" hierarchical specification or the ordinal regression ("'family' must be one of binomial, gaussian, Gamma, inverse.gaussian, poisson, neg_binomial_2, mgcv::betar")
+
+## get array/atrix of log-likelihood values to pass to the loo function
+
 ```{r}
-looOrd <- loo(modSLoo, save_psis = TRUE)
-looOrdInter <- loo(modRLoo2, save_psis = TRUE)
+#Amani's model
+modALooAdj <- 
+rel_n_eff <- relative_eff(exp(modALooAdj))
+looHier <- loo(modALooAdj, r_eff = rel_n_eff, cores = 2, save_psis = TRUE)
+
+#Shane's model
+modSLooAdj <- 
+rel_n_eff <- relative_eff(exp(modSLooAdj))
+looOrd <- loo(modSLooAdj, r_eff = rel_n_eff, cores = 2, save_psis = TRUE)
+
+#Rebekah's model 1
+modRLoo1Adj <- 
+rel_n_eff <- relative_eff(exp(modRLoo1Adj))
+looOrdHier <- loo(modRLoo1Adj, r_eff = rel_n_eff, cores = 2, save_psis = TRUE)
+
+#Rebekah's model 2
+modRLoo2Adj <- 
+rel_n_eff <- relative_eff(exp(modRLoo2Adj))
+looOrdInter <- loo(modRLoo2Adj, r_eff = rel_n_eff, cores = 2, save_psis = TRUE)
 ```
 
 ## PSIS Diagnostic Plots
 ```{r}
+plot(looHier)
 plot(looOrd)
+plot(looOrdHier)
 plot(looOrdInter)
 ```
 
 ## Marginal PPCs
 ```{r}
+#Amani's model
+yrep <- posterior_predict(modALoo)
+ppc_loo_pit_qq(
+  y = newdata1$y,
+  yrep = yrep,
+  lw = weights(looHier$psis_object)
+)
 #Shane's model
 yrep <- posterior_predict(modSLoo)
-
 ppc_loo_pit_qq(
   y = newdata1$y,
   yrep = yrep,
   lw = weights(looOrd$psis_object)
 )
-
+#Rebekah's model 1
+yrep <- posterior_predict(modRLoo1)
+ppc_loo_pit_qq(
+  y = newdata1$y,
+  yrep = yrep,
+  lw = weights(looOrdHier$psis_object)
+)
 #Rebekah's model 2
 yrep <- posterior_predict(modRLoo2)
-
 ppc_loo_pit_qq(
   y = newdata1$y,
   yrep = yrep,
   lw = weights(looOrdInter$psis_object)
 )
-
 ```
 
 
 ## Comparing Models on Expected Log Predictive Density
 ```{r}
+#linear regression w region hierarchical variable vs ordinal regression w/ no hierarchy
+loo_compare(looHier, looOrd)
+#linear vs ordinal, both w region hierarchical
+loo_compare(looHier, looOrdHier)
 #ordinal without vs with interactions
 loo_compare(looOrd, looOrdInter)
+#ordinal without vs with hierarchical
+loo_compare(looOrd, looOrdHier)
+#ordinal with hierarchical no interactions vs interactions no hierarchical
+loo_compare(looOrdHier, looOrdInter)
 ```
-
-
