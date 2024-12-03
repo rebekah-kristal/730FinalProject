@@ -1,0 +1,85 @@
+---
+title: "730 Group Project"
+author: "Rebekah Kristal with collaborators Amani Chehimi & Shane Fitzgerald"
+date: "2024-11-30"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(ggplot2)
+library(brms)
+library(posterior)
+library(tidybayes)
+library(rstan)
+library(bayesplot)
+```
+# Amani's Model: weighted linear regression
+```{r}
+newdata <- read_csv("FreqCategories.csv") %>%  mutate(Weight = Freq / sum(Freq))
+newdata<-mutate(newdata, weight.var=1/Freq) %>% mutate(REGION=as.factor(REGION)) %>% mutate(AgeCat=as.factor(AgeCat)) %>% mutate(SEX=as.factor(SEX)) %>% mutate(RACENEW=as.factor(RACENEW))%>%mutate(EduCat=as.factor(EduCat)) %>% mutate(POORYN=as.factor(POORYN))
+
+#converting y's into factor variable, changing range from 0-8 to 1-9 to match with model output
+newdata1<-mutate(newdata, y=y+1) %>% mutate(y, factor(y, ordered=TRUE)) 
+
+
+
+modA <- brm(
+  y | weights(Weight) ~ (1 | REGION + AgeCat + SEX + RACENEW + EduCat + POORYN), 
+  family = gaussian(), 
+  data = newdata1, 
+  iter = 1000, 
+  chains = 4, 
+  cores = getOption("mc.cores", 4), 
+  seed = 12345
+) 
+summary(modA)
+prior_summary(modA)
+pp_check(modA)
+```
+
+# Analysis with Amani's Model
+```{r}
+observed_counts <- select(newdata1, c(y, Freq)) 
+total_freq<-group_by(observed_counts, y) %>% summarise(total=sum(Freq)) 
+observed_props<-mutate(total_freq, observed=total/sum(total)) %>% mutate(y=as.factor(y))
+
+
+get_sum_stat<-function(y, row){(sum(y==5))/nrow(row)}
+
+tobs<-observed_props[5,3]
+
+predicted_catsR<-as.data.frame(posterior_predict(modA))
+ynew_siR<-apply(predicted_catsR, 1, get_sum_stat, newdata)
+#ppc for proportion of observations in category 5
+hist(ynew_siR)
+abline(v = tobs)
+
+#ppc for all categories
+#formatting for ggplot
+posterior_preds_longR <- predicted_catsR %>%
+  pivot_longer(cols = everything(), names_to = "chain", values_to = "predicted_category")
+
+posterior_preds_longR$predicted_category <- as.factor(posterior_preds_longR$predicted_category)
+
+category_countsR <- table(posterior_preds_longR$predicted_category)
+category_counts_dfR <- as.data.frame(category_countsR)
+colnames(category_counts_dfR) <- c("y", "Count")
+category_counts_propR<-mutate(category_counts_dfR, predicted=Count/(4000*5462))
+
+combinedR<-left_join(observed_props, category_counts_propR, by="y")
+combined1R<-pivot_longer(combinedR, c(3,5), names_to = "Freq")
+
+#plot of proportion of each category for observed and predicted data
+ggplot(combined1R, mapping=aes(x=y, y=value, fill=Freq))+
+  geom_bar(stat="identity", position="dodge")+
+  labs(title = "Mental Health Category Proportions for Observed and Predicted Data",
+       x = "Category",
+       y = "Proportion") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
