@@ -21,8 +21,8 @@ library(loo)
 ```
 # Data reformatting
 ```{r}
-newdata <- read_csv("FreqCategories.csv") %>%  mutate(Weight = Freq / sum(Freq))
-newdata<-mutate(newdata, weight.var=1/Freq) %>% mutate(REGION=as.factor(REGION)) %>% mutate(AgeCat=as.factor(AgeCat)) %>% mutate(SEX=as.factor(SEX)) %>% mutate(RACENEW=as.factor(RACENEW))%>%mutate(EduCat=as.factor(EduCat)) %>% mutate(POORYN=as.factor(POORYN))
+newdata <- read_csv("FreqCategories.csv")
+newdata<-mutate(newdata, REGION=as.factor(REGION)) %>% mutate(AgeCat=as.factor(AgeCat)) %>% mutate(SEX=as.factor(SEX)) %>% mutate(RACENEW=as.factor(RACENEW))%>%mutate(EduCat=as.factor(EduCat)) %>% mutate(POORYN=as.factor(POORYN))
 
 #converting y's into factor variable, changing range from 0-8 to 1-9 to match with model output
 newdata1<-mutate(newdata, y=y+1) %>% mutate(y, factor(y, ordered=TRUE)) 
@@ -32,7 +32,7 @@ newdata1<-mutate(newdata, y=y+1) %>% mutate(y, factor(y, ordered=TRUE))
 ## Amani's model: weighted linear regression with hierarchical variable
 ```{r}
 modALoo <- brm(
-  y | weights(Weight) ~ (1 | REGION + AgeCat + SEX + RACENEW + EduCat + POORYN), 
+  y | weights(Freq) ~ (1 | REGION + AgeCat + SEX + RACENEW + EduCat + POORYN), 
   data = newdata1,
   family = gaussian(), 
   iter = 1000, 
@@ -45,7 +45,7 @@ modALoo <- brm(
 ## Shane's model: weighted ordinal regression
 ```{r}
 modSLoo <- brm(
-  y|weights(Weight)~REGION + AgeCat + SEX + RACENEW + EduCat + POORYN,
+  y|weights(Freq)~REGION + AgeCat + SEX + RACENEW + EduCat + POORYN,
   data = newdata1, 
   family=cumulative(link="logit"),  
   iter = 1000, 
@@ -58,7 +58,7 @@ modSLoo <- brm(
 ## Rebekah's model 1: weighted ordinal regression with hierarchical variable
 ```{r}
 modRLoo1 <- brm(
-  y | weights(Weight) ~ (1 | REGION + AgeCat + SEX + RACENEW + EduCat + POORYN),
+  y | weights(Freq) ~ (1 | REGION + AgeCat + SEX + RACENEW + EduCat + POORYN),
   data = newdata1,
   family=cumulative(link="logit"),  
   iter = 1000, 
@@ -71,7 +71,7 @@ modRLoo1 <- brm(
 ## Rebekah's model 2: weighted ordinal regression with interactions
 ```{r}
 modRLoo2 <- brm(
-  y|weights(Weight)~REGION + AgeCat + SEX + RACENEW + EduCat + POORYN + REGION*POORYN + REGION*RACENEW + RACENEW*POORYN, 
+  y|weights(Freq)~REGION + AgeCat + SEX + RACENEW + EduCat + POORYN + REGION*POORYN + REGION*RACENEW + RACENEW*POORYN, 
   data = newdata1,
   family=cumulative(link="logit"),  
   iter = 1000, 
@@ -143,38 +143,30 @@ make_ppc_plot(modRLoo2)
 ```
 
 # Model Comparisons using loo package
-Note: using brm to fit all models, then will "pass an array or matrix of log-likelihood values to the loo function," since stan_glm doesn't like the "|" hierarchical specification or the ordinal regression ("'family' must be one of binomial, gaussian, Gamma, inverse.gaussian, poisson, neg_binomial_2, mgcv::betar")
-
-## get array/atrix of log-likelihood values to pass to the loo function
+From module 11.2 code
+*Error: Moment matching failed. Perhaps you did not set 'save_pars = save_pars(all = TRUE)' when fitting your model?*
 
 ```{r}
 #Amani's model
-modALooAdj <- 
-rel_n_eff <- relative_eff(exp(modALooAdj))
-looHier <- loo(modALooAdj, r_eff = rel_n_eff, cores = 2, save_psis = TRUE)
+looHier <- loo(modALoo, save_psis = TRUE) #, moment_match = TRUE)
 
 #Shane's model
-modSLooAdj <- 
-rel_n_eff <- relative_eff(exp(modSLooAdj))
-looOrd <- loo(modSLooAdj, r_eff = rel_n_eff, cores = 2, save_psis = TRUE)
+looOrd <- loo(modSLoo, save_psis = TRUE) #, moment_match = TRUE)
 
 #Rebekah's model 1
-modRLoo1Adj <- 
-rel_n_eff <- relative_eff(exp(modRLoo1Adj))
-looOrdHier <- loo(modRLoo1Adj, r_eff = rel_n_eff, cores = 2, save_psis = TRUE)
+looOrdHier <- loo(modRLoo1, save_psis = TRUE) #, moment_match = TRUE)
 
 #Rebekah's model 2
-modRLoo2Adj <- 
-rel_n_eff <- relative_eff(exp(modRLoo2Adj))
-looOrdInter <- loo(modRLoo2Adj, r_eff = rel_n_eff, cores = 2, save_psis = TRUE)
+looOrdInter <- loo(modRLoo2, save_psis = TRUE) #, moment_match = TRUE)
 ```
+70/122/131/154 observations with a pareto_k > 0.7 in model. We recommend to set 'moment_match = TRUE' in order to perform moment matching for problematic observations. We recommend to run more iterations to get at least about 2200 posterior draws to improve LOO-CV approximation accuracy.
 
 ## PSIS Diagnostic Plots
 ```{r}
-plot(looHier)
-plot(looOrd)
-plot(looOrdHier)
-plot(looOrdInter)
+plot(looHier, diagnostic = c("k"), label_points = TRUE, main = "PSIS diagnostic plot")
+plot(looOrd, diagnostic = c("k"), label_points = TRUE, main = "PSIS diagnostic plot")
+plot(looOrdHier, diagnostic = c("k"), label_points = TRUE, main = "PSIS diagnostic plot")
+plot(looOrdInter, diagnostic = c("k"), label_points = TRUE, main = "PSIS diagnostic plot")
 ```
 
 ## Marginal PPCs
@@ -223,3 +215,47 @@ loo_compare(looOrd, looOrdHier)
 #ordinal with hierarchical no interactions vs interactions no hierarchical
 loo_compare(looOrdHier, looOrdInter)
 ```
+```{r}
+summary(modSLoo)
+#summary(modRLoo1)
+```
+```{r}
+pp_check(modALoo)
+```
+```{r}
+#reference category: mental health score = 0, region = 1 (Northeast), age = adult (18-34), sex = 1 (Male), race = 100 (white), Education = Grade 12 or less, no diploma, Poverty = 1 (At or above poverty threshold)
+                                        Estimate, l-95% CI, u-95% CI
+Intercept[1]                               -0.35, -0.39    -0.31
+Intercept[2]                                0.43, 0.39     0.47
+Intercept[3]                                1.15, 1.11     1.19
+Intercept[4]                                1.56, 1.52     1.60
+Intercept[5]                                2.10, 2.06     2.14
+Intercept[6]                                2.54, 2.50     2.59
+Intercept[7]                                3.07, 3.03     3.12
+Intercept[8]                                3.68, 3.64     3.74
+North Central/midwest                       0.04, 0.00     0.07
+South                                      -0.07, -0.10    -0.04
+West                                        0.09, 0.06     0.12
+Elderly                                    -0.38, -0.41    -0.36
+YoungAdult                                 -0.03, -0.06    -0.00
+Female                                      0.45, 0.43     0.47
+Black/African American                     -0.41, -0.44    -0.38
+American Indian/Alaska Native              -0.10, -0.20    -0.00
+Asian                                      -0.54, -0.59    -0.50
+Race Not Releasable                        -0.53, -0.74    -0.32
+Multiple Race                               0.26, 0.20     0.33
+"Graduate, Professional, or other Degree"   0.13, 0.09     0.17
+EduCatHighschoolDiplomaGEDgraduate          0.02, -0.01     0.06
+EduCatSomecollegeAAorBachelorsDegree        0.12, 0.09     0.16
+Below poverty threshold                     0.51, 0.48     0.54
+
+```
+
+
+Rhat ~1, Bulk & Tail ESS all >4*100
+
+
+
+
+
+
