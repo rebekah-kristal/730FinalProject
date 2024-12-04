@@ -85,7 +85,7 @@ modRLoo2 <- brm(
 
 ## get observed counts from data
 ```{r}
-observed_counts <- select(newdata1, c(y, Freq)) 
+observed_counts <- dplyr::select(newdata1, c(y, Freq)) 
 total_freq<-group_by(observed_counts, y) %>% summarise(total=sum(Freq)) 
 observed_props<-mutate(total_freq, observed=total/sum(total)) %>% mutate(y=as.factor(y))
 
@@ -114,7 +114,7 @@ make_ppc_plot <- function(model_name){
     category_countsR <- table(posterior_preds_longR$predicted_category)
     category_counts_dfR <- as.data.frame(category_countsR)
     colnames(category_counts_dfR) <- c("y", "Count")
-    category_counts_propR<-mutate(category_counts_dfR, predicted=Count/(4000*5462))
+    category_counts_propR<-mutate(category_counts_dfR, predicted=Count/(sum(Count)))
     
     combinedR<-left_join(observed_props, category_counts_propR, by="y")
     combined1R<-pivot_longer(combinedR, c(3,5), names_to = "Freq")
@@ -216,44 +216,60 @@ loo_compare(looOrd, looOrdHier)
 loo_compare(looOrdHier, looOrdInter)
 ```
 ```{r}
-summary(modSLoo)
-#summary(modRLoo1)
+loo_compare(looHier, looOrd, looOrdHier, looOrdInter)
 ```
+
+
+```{r}
+summary(modSLoo)
+summary(modRLoo1)
+```
+
 ```{r}
 pp_check(modALoo)
 ```
+
 ```{r}
 #reference category: mental health score = 0, region = 1 (Northeast), age = adult (18-34), sex = 1 (Male), race = 100 (white), Education = Grade 12 or less, no diploma, Poverty = 1 (At or above poverty threshold)
-                                        Estimate, l-95% CI, u-95% CI
-Intercept[1]                               -0.35, -0.39    -0.31
-Intercept[2]                                0.43, 0.39     0.47
-Intercept[3]                                1.15, 1.11     1.19
-Intercept[4]                                1.56, 1.52     1.60
-Intercept[5]                                2.10, 2.06     2.14
-Intercept[6]                                2.54, 2.50     2.59
-Intercept[7]                                3.07, 3.03     3.12
-Intercept[8]                                3.68, 3.64     3.74
-North Central/midwest                       0.04, 0.00     0.07
-South                                      -0.07, -0.10    -0.04
-West                                        0.09, 0.06     0.12
-Elderly                                    -0.38, -0.41    -0.36
-YoungAdult                                 -0.03, -0.06    -0.00
-Female                                      0.45, 0.43     0.47
-Black/African American                     -0.41, -0.44    -0.38
-American Indian/Alaska Native              -0.10, -0.20    -0.00
-Asian                                      -0.54, -0.59    -0.50
-Race Not Releasable                        -0.53, -0.74    -0.32
-Multiple Race                               0.26, 0.20     0.33
-"Graduate, Professional, or other Degree"   0.13, 0.09     0.17
-EduCatHighschoolDiplomaGEDgraduate          0.02, -0.01     0.06
-EduCatSomecollegeAAorBachelorsDegree        0.12, 0.09     0.16
-Below poverty threshold                     0.51, 0.48     0.54
+#           
+ordModelCoeffs <- tribble(
+            ~Coefficient, ~Estimate, ~Lower, ~Upper,
+            "Intercept[1]", -0.35, -0.39, -0.31, 
+            "Intercept[2]", 0.43, 0.39, 0.47,
+            "Intercept[3]", 1.15, 1.11, 1.19, 
+            "Intercept[4]", 1.56, 1.52, 1.60,
+            "Intercept[5]", 2.10, 2.06, 2.14,
+            "Intercept[6]", 2.54, 2.50, 2.59,
+            "Intercept[7]", 3.07, 3.03, 3.12,
+            "Intercept[8]", 3.68, 3.64, 3.74,
+            "North Central/midwest", 0.04, 0.00, 0.07,
+            "South", -0.07, -0.10, -0.04,
+            "West", 0.09, 0.06, 0.12,
+            "YoungAdult", -0.03, -0.06, -0.00,
+            "Elderly", -0.38, -0.41, -0.36,
+            "Female", 0.45, 0.43, 0.47,
+            "Race Not Releasable", -0.53, -0.74, -0.32,
+            "Black/African American", -0.41, -0.44, -0.38,
+            "American Indian/Alaska Native", -0.10, -0.20, -0.00,
+            "Asian", -0.54, -0.59, -0.50,
+            "Multiple Race", 0.26, 0.20, 0.33,
+            "High School Diploma or GED Graduate", 0.02, -0.01, 0.06,
+            "Some College, AA, or Bachelor's Degree", 0.12, 0.09, 0.16,
+            "Graduate, Professional, or other Degree", 0.13, 0.09, 0.17,
+            "Below poverty threshold", 0.51, 0.48, 0.54)
 
+ordModelCoeffs
+
+#reorder y axis
+ordModelCoeffs$Coefficient <- factor(ordModelCoeffs$Coefficient, levels=unique(ordModelCoeffs$Coefficient))
+
+
+ordModelCoeffs %>% ggplot(aes(y = Coefficient, x = Estimate, xmin = Lower, xmax = Upper)) + geom_pointinterval()
 ```
 
 
 Rhat ~1, Bulk & Tail ESS all >4*100
-
+$ log\left(\frac{P(y_i \leq k)}{P(y_i > k)} \right) = \zeta_k - $
 
 
 
