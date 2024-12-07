@@ -201,6 +201,13 @@ ppc_loo_pit_qq(
 )
 ```
 
+```{r}
+yrep <- posterior_predict(modSLoo)
+psis_all <- looOrd$psis_object
+lw_all <- weights(psis_all) 
+ppc_loo_pit_overlay(y = newdata1$y, yrep, lw = lw_all)
+
+```
 
 ## Comparing Models on Expected Log Predictive Density
 ```{r}
@@ -215,6 +222,7 @@ loo_compare(looOrd, looOrdHier)
 #ordinal with hierarchical no interactions vs interactions no hierarchical
 loo_compare(looOrdHier, looOrdInter)
 ```
+
 ```{r}
 loo_compare(looHier, looOrd, looOrdHier, looOrdInter)
 ```
@@ -258,6 +266,11 @@ ordModelCoeffs <- tribble(
             "Graduate, Professional, or other Degree", 0.13, 0.09, 0.17,
             "Below poverty threshold", 0.51, 0.48, 0.54)
 
+# take eta = -beta
+# ref ref ref = 1.56
+# poverty ref ref = 1.56 - 0.51 = 1.05
+# ref multiple ref = 1.56 - 0.26 = 1.30
+# ref ref south = 1.56 - (-0.07) = 1.63
 ordModelCoeffs
 
 #reorder y axis
@@ -269,7 +282,59 @@ ordModelCoeffs %>% ggplot(aes(y = Coefficient, x = Estimate, xmin = Lower, xmax 
 
 
 Rhat ~1, Bulk & Tail ESS all >4*100
-$ log\left(\frac{P(y_i \leq k)}{P(y_i > k)} \right) = \zeta_k - $
+
+# Equation for ordinal interactions
+$ log\left(\frac{P(y_i \leq k)}{P(y_i > k)} \right) = \zeta_k - \eta_1x_{i1}-...-\eta_jx_{ij} - H_{I1}x_{i1}*x_{i2} - H_{I2}x_{i1}*x_{i3} - H_{I3}x_{i2}*x_{i3} + \varepsilon_i$
+
+$ log\left(\frac{P(y_i \leq k)}{P(y_i > k)} \right) = above - H_{I1}Poverty*Region - H_{I2}Poverty*Race - H_{I3}Region*Race + \varepsilon_i$
+
+# equation for ordinal hierarchical
+$ log\left(\frac{P(y_i \leq k)}{P(y_i > k)} \right) = \zeta_k + \xi_{[i]k}- \eta_1x_{i1}-...-\eta_jx_{ij} + \varepsilon_i$
+
+
+# amani's eq
+$y_i = \alpha_{j[i]} + \beta^T*x_i + \varepsilon_i = M_i + \varepsilon_i$
+$y_i = \mu_\alpha + \delta_{j[i]} + \beta^T*x_i + \varepsilon_i = \alpha_{j[i]} + \beta^T*x_i + \varepsilon_i = M_i + \varepsilon_i$
+$y_i|(\alpha_{j[i]}, \beta, \sigma_y) \sim N(\alpha_{j[i]} + \beta^T*x_i, \sigma_y^2)$
+$\alpha_{j[i]}|(\mu_\alpha, \sigma_\alpha) \sim N(\mu_\alpha, \sigma_\alpha^2),\ with\ priors\ on\ \beta, \mu_\alpha, \sigma_\alpha, \sigma_y$
+
+
+# shane's eq
+$ log\left(\frac{P(y_i \leq k)}{P(y_i > k)} \right) = \zeta_k - \eta_1x_{i1}-...-\eta_jx_{ij} + \varepsilon_i$
+
+# estimates
+$ log\left(\frac{P(y_i \leq 4)}{P(y_i > 4)} \right)$
+$ P(y_i \leq 4)$
+
+```{r}
+newdata1 %>% group_by(POORYN, y) %>% summarise(count = sum(Freq)) %>% ggplot(aes(x = POORYN, y = y, size = count)) + geom_point()
+
+```
+# coeff plot using bayesplot (??)
+```{r}
+posterior <- as.array(modSLoo)
+dim(posterior)
+Coeffs <- dimnames(posterior)$variable[1:23]
+mcmc_intervals(posterior, Coeffs)
+mcmc_areas(posterior, Coeffs)
+```
+
+# get probas instead of cumulative log odds 
+```{r}
+invlogit <- function(x) 1/(1+exp(-x))
+invlogit(1.56)
+invlogit(1.05)
+invlogit(1.30)
+invlogit(1.63)
+# take eta = -beta
+# ref ref ref = 1.56
+# poverty ref ref = 1.56 - 0.51 = 1.05
+# ref multiple ref = 1.56 - 0.26 = 1.30
+# ref ref south = 1.56 - (-0.07) = 1.63
+```
+
+
+
 
 
 
